@@ -1,0 +1,20 @@
+{
+  "name": "@openclaw/tikhub",
+  "version": "2026.2.22",
+  "description": "OpenClaw plugin: TikHub API tool for TikTok/Douyin/social media data",
+  "type": "module",
+  "dependencies": {
+    "@sinclair/typebox": "0.34.48"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "install": {
+      "npmSpec": "@openclaw/tikhub",
+      "localPath": "extensions/tikhub",
+      "defaultChoice": "npm"
+    }
+  }
+}
