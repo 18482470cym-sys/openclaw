@@ -451,6 +451,40 @@ describe("devices cli list", () => {
     expect(output).toContain("operator.read");
     expect(output).toContain("scope upgrade");
   });
+
+  it("sanitizes device-controlled terminal output", async () => {
+    callGateway.mockResolvedValueOnce({
+      pending: [
+        {
+          requestId: "req-1",
+          deviceId: "device-1",
+          displayName: "Bad\u001b[2J\nName",
+          role: "operator",
+          scopes: ["operator.admin"],
+          remoteIp: "10.0.0.9\rspoof",
+          ts: 1,
+        },
+      ],
+      paired: [
+        {
+          deviceId: "device-1",
+          displayName: "Pair\u001b]8;;https://evil.example\u001b\\ed",
+          roles: ["operator"],
+          scopes: ["operator.read"],
+          remoteIp: "10.0.0.1\u007f",
+        },
+      ],
+    });
+
+    await runDevicesCommand(["list"]);
+
+    const output = runtime.log.mock.calls.map((entry) => readRuntimeCallText(entry)).join("\n");
+    expect(output).not.toContain("\u001b");
+    expect(output).not.toContain("\r");
+    expect(output).toContain("BadName");
+    expect(output).toContain("spoof");
+    expect(output).toContain("Paired");
+  });
 });
 
 beforeEach(() => {

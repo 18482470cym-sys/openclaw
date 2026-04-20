@@ -18,4 +18,18 @@ describe("formatConnectError", () => {
       "device scope upgrade requires approval (approved: operator.read; requested: operator.admin, operator.read)",
     );
   });
+
+  it("explains role upgrades that require approval", () => {
+    expect(
+      formatConnectError({
+        message: "pairing required",
+        details: {
+          code: ConnectErrorDetailCodes.PAIRING_REQUIRED,
+          reason: "role-upgrade",
+          approvedRoles: ["operator"],
+          requestedRole: "node",
+        },
+      }),
+    ).toBe("device role upgrade requires approval (approved: operator; requested: node)");
+  });
 });

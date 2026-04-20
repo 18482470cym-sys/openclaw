@@ -24,6 +24,7 @@ type PendingLike = {
 };
 
 type PairedLike = {
+  role?: string;
   roles?: string[];
   scopes?: string[];
 };
@@ -65,7 +66,7 @@ export function summarizePendingDeviceAccess(request: PendingLike): DevicePairin
 
 export function summarizeApprovedDeviceAccess(device: PairedLike): DevicePairingAccessSummary {
   return {
-    roles: normalizeRoleList(device.roles),
+    roles: normalizeRoleList(device.roles, device.role),
     scopes: normalizeDeviceAuthScopes(device.scopes),
   };
 }

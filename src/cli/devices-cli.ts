@@ -21,6 +21,7 @@ import {
   normalizeOptionalString,
   normalizeStringifiedOptionalString,
 } from "../shared/string-coerce.js";
+import { sanitizeForLog } from "../terminal/ansi.js";
 import { getTerminalTableWidth, renderTable } from "../terminal/table.js";
 import { theme } from "../terminal/theme.js";
 import { withProgress } from "./progress.js";
@@ -217,21 +218,29 @@ function formatTokenSummary(tokens: DeviceTokenSummary[] | undefined) {
     return "none";
   }
   const parts = tokens
-    .map((t) => `${t.role}${t.revokedAtMs ? " (revoked)" : ""}`)
+    .map((t) => `${sanitizeForLog(t.role)}${t.revokedAtMs ? " (revoked)" : ""}`)
     .toSorted((a, b) => a.localeCompare(b));
   return parts.join(", ");
 }
 
 function formatPendingDeviceIdentity(request: PendingDevice): string {
-  return normalizeOptionalString(request.displayName) ?? request.deviceId;
+  const displayName = normalizeOptionalString(request.displayName);
+  if (displayName) {
+    return sanitizeForLog(displayName);
+  }
+  return sanitizeForLog(normalizeOptionalString(request.deviceId) ?? "");
 }
 
 function formatAccessSummary(access: DevicePairingAccessSummary | null): string {
   if (!access) {
     return "none";
   }
-  const roles = access.roles.length > 0 ? access.roles.join(", ") : "none";
-  const scopes = access.scopes.length > 0 ? access.scopes.join(", ") : "none";
+  const roles =
+    access.roles.length > 0 ? access.roles.map((role) => sanitizeForLog(role)).join(", ") : "none";
+  const scopes =
+    access.scopes.length > 0
+      ? access.scopes.map((scope) => sanitizeForLog(scope)).join(", ")
+      : "none";
   return `roles: ${roles}; scopes: ${scopes}`;
 }
 
@@ -353,7 +362,7 @@ export function registerDevicesCli(program: Command) {
                 }
                 return {
                   Request: req.requestId,
-                  Device: `${req.displayName || req.deviceId}${req.remoteIp ? ` · ${req.remoteIp}` : ""}`,
+                  Device: `${formatPendingDeviceIdentity(req)}${req.remoteIp ? ` · ${sanitizeForLog(req.remoteIp)}` : ""}`,
                   Requested: formatAccessSummary(approval.requested),
                   Approved: formatAccessSummary(approval.approved),
                   Age: typeof req.ts === "number" ? formatTimeAgo(Date.now() - req.ts) : "",
@@ -379,11 +388,15 @@ export function registerDevicesCli(program: Command) {
                 { key: "IP", header: "IP", minWidth: 12 },
               ],
               rows: list.paired.map((device) => ({
-                Device: device.displayName || device.deviceId,
-                Roles: device.roles?.length ? device.roles.join(", ") : "",
-                Scopes: device.scopes?.length ? device.scopes.join(", ") : "",
+                Device: sanitizeForLog(device.displayName || device.deviceId),
+                Roles: device.roles?.length
+                  ? device.roles.map((role) => sanitizeForLog(role)).join(", ")
+                  : "",
+                Scopes: device.scopes?.length
+                  ? device.scopes.map((scope) => sanitizeForLog(scope)).join(", ")
+                  : "",
                 Tokens: formatTokenSummary(device.tokens),
-                IP: device.remoteIp ?? "",
+                IP: device.remoteIp ? sanitizeForLog(device.remoteIp) : "",
               })),
             }).trimEnd(),
           );
