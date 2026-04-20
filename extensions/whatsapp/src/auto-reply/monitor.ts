@@ -115,7 +115,11 @@ function isRetryableAuthUnstableError(error: unknown): error is WhatsAppAuthUnst
 async function shouldStartWhatsAppDebounceTyping(params: {
   cfg: ReturnType<typeof loadConfig>;
   msg: WebInboundMsg;
+  echoHas: (key: string) => boolean;
 }): Promise<boolean> {
+  if (params.echoHas(params.msg.body)) {
+    return false;
+  }
   const cfg = params.cfg;
   const peerId = resolvePeerId(params.msg);
   const route = resolveAgentRoute({
@@ -359,6 +363,7 @@ export async function monitorWebChannel(
                 shouldStartWhatsAppDebounceTyping({
                   cfg: loadConfig(),
                   msg,
+                  echoHas: echoTracker.has,
                 }),
               socketRef: controller.socketRef,
               shouldRetryDisconnect: () => !sigintStop && controller.shouldRetryDisconnect(),

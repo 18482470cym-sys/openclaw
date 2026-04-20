@@ -519,6 +519,58 @@ describe("web auto-reply connection", () => {
     resetLoadConfigMock();
   });
 
+  it("suppresses debounce typing for echo-filtered inbound text", async () => {
+    const capture = createWebListenerFactoryCapture();
+    const replyResolver = vi.fn(async () => ({ text: "echo me" }));
+
+    setLoadConfigMock({
+      channels: {
+        whatsapp: {
+          debounceMs: 250,
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig);
+
+    await monitorWebChannel(false, capture.listenerFactory as never, false, replyResolver);
+
+    const capturedOnMessage = capture.getOnMessage();
+    expect(capturedOnMessage).toBeTypeOf("function");
+    await sendWebDirectInboundMessage({
+      onMessage: capturedOnMessage!,
+      body: "hello",
+      from: "+15550001111",
+      to: "+15550009999",
+      id: "seed-echo",
+      spies: {
+        sendMedia: vi.fn(),
+        reply: vi.fn().mockResolvedValue(undefined),
+        sendComposing: vi.fn(),
+      },
+    });
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+
+    const shouldStartDebounceTyping = capture.getLastOptions()?.shouldStartDebounceTyping;
+    expect(shouldStartDebounceTyping).toBeTypeOf("function");
+    await expect(
+      shouldStartDebounceTyping?.({
+        body: "echo me",
+        from: "+15550001111",
+        conversationId: "+15550001111",
+        to: "+15550009999",
+        accountId: "default",
+        chatType: "direct",
+        chatId: "direct:+15550001111",
+        id: "m1",
+        sendComposing: vi.fn(),
+        reply: vi.fn(),
+        sendMedia: vi.fn(),
+      } as never),
+    ).resolves.toBe(false);
+
+    resetLoadConfigMock();
+  });
+
   it("processes inbound messages without batching and preserves timestamps", async () => {
     await withEnvAsync({ TZ: "Europe/Vienna" }, async () => {
       const originalMax = process.getMaxListeners();
