@@ -152,15 +152,33 @@ export function createBlueBubblesDebounceRegistry(params: {
             return `bluebubbles:${account.accountId}:msg:${associatedMessageGuid}`;
           }
 
+          // Optional: coalesce consecutive DM messages from the same sender
+          // within the debounce window. Two distinct user sends (e.g.
+          // `Dump` followed by a pasted URL that iMessage renders as a
+          // standalone rich-link balloon) have distinct messageIds and no
+          // associatedMessageGuid cross-reference, so the default per-message
+          // key dispatches them as separate agent turns. Hashing to
+          // chat:sender lets the debounce window merge them. DMs only —
+          // group chats continue to key per-message to preserve multi-user
+          // conversational structure.
+          const chatKey =
+            msg.chatGuid?.trim() ??
+            msg.chatIdentifier?.trim() ??
+            (msg.chatId ? String(msg.chatId) : "dm");
+          if (
+            account.config.coalesceSameSenderDms &&
+            !msg.isGroup &&
+            !balloonBundleId &&
+            !associatedMessageGuid
+          ) {
+            return `bluebubbles:${account.accountId}:dm:${chatKey}:${msg.senderId}`;
+          }
+
           const messageId = msg.messageId?.trim();
           if (messageId) {
             return `bluebubbles:${account.accountId}:msg:${messageId}`;
           }
 
-          const chatKey =
-            msg.chatGuid?.trim() ??
-            msg.chatIdentifier?.trim() ??
-            (msg.chatId ? String(msg.chatId) : "dm");
           return `bluebubbles:${account.accountId}:${chatKey}:${msg.senderId}`;
         },
         shouldDebounce: (entry) => {

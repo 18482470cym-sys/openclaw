@@ -1458,6 +1458,7 @@ export const BlueBubblesAccountSchemaBase = z
     heartbeat: ChannelHeartbeatVisibilitySchema,
     healthMonitor: ChannelHealthMonitorSchema,
     responsePrefix: z.string().optional(),
+    coalesceSameSenderDms: z.boolean().optional(),
   })
   .strict();
 

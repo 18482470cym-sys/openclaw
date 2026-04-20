@@ -926,6 +926,161 @@ describe("BlueBubbles webhook monitor", () => {
       }
     });
 
+    it("coalesces same-sender DM messages when coalesceSameSenderDms is enabled", async () => {
+      vi.useFakeTimers();
+      try {
+        const core = createMockRuntime();
+        installTimingAwareInboundDebouncer(core);
+        const processMessage = vi.fn().mockResolvedValue(undefined);
+        const registry = createBlueBubblesDebounceRegistry({ processMessage });
+        const account = createMockAccount({ coalesceSameSenderDms: true });
+        const target = {
+          account,
+          config: {},
+          runtime: { log: vi.fn(), error: vi.fn() },
+          core,
+          path: "/bluebubbles-webhook",
+        };
+        const debouncer = registry.getOrCreateDebouncer(target);
+
+        const chatGuid = "iMessage;-;+15551234567";
+
+        // Two distinct user sends: a command ("Dump") followed by a URL.
+        // No associatedMessageGuid linking them. Default buildKey hashes by
+        // per-message messageId, so historically they dispatched separately.
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "Dump",
+            messageId: "dm-msg-1",
+          }),
+          target,
+        });
+
+        await vi.advanceTimersByTimeAsync(300);
+
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "https://example.com/article",
+            messageId: "dm-msg-2",
+          }),
+          target,
+        });
+
+        expect(processMessage).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(600);
+
+        expect(processMessage).toHaveBeenCalledTimes(1);
+        expect(processMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: "Dump https://example.com/article",
+          }),
+          target,
+        );
+        expect(target.runtime.error).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not coalesce same-sender DM messages when coalesceSameSenderDms is off (default)", async () => {
+      vi.useFakeTimers();
+      try {
+        const core = createMockRuntime();
+        installTimingAwareInboundDebouncer(core);
+        const processMessage = vi.fn().mockResolvedValue(undefined);
+        const registry = createBlueBubblesDebounceRegistry({ processMessage });
+        const account = createMockAccount();
+        const target = {
+          account,
+          config: {},
+          runtime: { log: vi.fn(), error: vi.fn() },
+          core,
+          path: "/bluebubbles-webhook",
+        };
+        const debouncer = registry.getOrCreateDebouncer(target);
+
+        const chatGuid = "iMessage;-;+15551234567";
+
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "Dump",
+            messageId: "dm-msg-1",
+          }),
+          target,
+        });
+
+        await vi.advanceTimersByTimeAsync(300);
+
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "https://example.com/article",
+            messageId: "dm-msg-2",
+          }),
+          target,
+        });
+
+        await vi.advanceTimersByTimeAsync(600);
+
+        expect(processMessage).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not coalesce group-chat messages even with coalesceSameSenderDms enabled", async () => {
+      vi.useFakeTimers();
+      try {
+        const core = createMockRuntime();
+        installTimingAwareInboundDebouncer(core);
+        const processMessage = vi.fn().mockResolvedValue(undefined);
+        const registry = createBlueBubblesDebounceRegistry({ processMessage });
+        const account = createMockAccount({ coalesceSameSenderDms: true });
+        const target = {
+          account,
+          config: {},
+          runtime: { log: vi.fn(), error: vi.fn() },
+          core,
+          path: "/bluebubbles-webhook",
+        };
+        const debouncer = registry.getOrCreateDebouncer(target);
+
+        const chatGuid = "iMessage;-;group-abc";
+
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "first",
+            messageId: "grp-msg-1",
+            isGroup: true,
+          }),
+          target,
+        });
+
+        await vi.advanceTimersByTimeAsync(300);
+
+        await debouncer.enqueue({
+          message: createDebounceTestMessage({
+            chatGuid,
+            text: "second",
+            messageId: "grp-msg-2",
+            isGroup: true,
+          }),
+          target,
+        });
+
+        await vi.advanceTimersByTimeAsync(600);
+
+        expect(processMessage).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("skips null-text entries during flush and still delivers the valid message", async () => {
       vi.useFakeTimers();
       try {
