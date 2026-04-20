@@ -84,6 +84,41 @@ describe("nodes devices pending rendering", () => {
     expect(text).toContain("operator.admin, operator.read");
   });
 
+  it("normalizes pending device ids before matching paired access", () => {
+    const container = document.createElement("div");
+    render(
+      renderNodes(
+        baseProps({
+          devicesList: {
+            pending: [
+              {
+                requestId: "req-1",
+                deviceId: " device-1 ",
+                displayName: "Device One",
+                role: "operator",
+                scopes: ["operator.admin", "operator.read"],
+                ts: Date.now(),
+              },
+            ],
+            paired: [
+              {
+                deviceId: "device-1",
+                displayName: "Device One",
+                roles: ["operator"],
+                scopes: ["operator.read"],
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("scope upgrade requires approval");
+    expect(text).toContain("approved now: roles: operator");
+  });
+
   it("falls back to roles when role is absent", () => {
     const container = document.createElement("div");
     render(

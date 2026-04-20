@@ -65,7 +65,11 @@ function renderDevices(props: NodesProps) {
           ? html`
               <div class="muted" style="margin-bottom: 8px;">Pending</div>
               ${pending.map((req) =>
-                renderPendingDevice(req, props, pairedByDeviceId.get(req.deviceId)),
+                renderPendingDevice(
+                  req,
+                  props,
+                  pairedByDeviceId.get(normalizeOptionalString(req.deviceId) ?? ""),
+                ),
               )}
             `
           : nothing}

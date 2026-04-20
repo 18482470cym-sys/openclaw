@@ -271,6 +271,17 @@ function indexPairedDevices(paired: PairedDevice[] | undefined): Map<string, Pai
   return out;
 }
 
+function lookupPairedDevice(
+  pairedByDeviceId: ReadonlyMap<string, PairedDevice>,
+  deviceId: string | undefined,
+): PairedDevice | undefined {
+  const normalizedDeviceId = normalizeOptionalString(deviceId);
+  if (!normalizedDeviceId) {
+    return undefined;
+  }
+  return pairedByDeviceId.get(normalizedDeviceId);
+}
+
 function quoteCliArg(value: string): string {
   if (/^[A-Za-z0-9_/:=.,@%+-]+$/.test(value)) {
     return value;
@@ -354,7 +365,7 @@ export function registerDevicesCli(program: Command) {
               rows: list.pending.map((req) => {
                 const approval = resolvePendingDeviceApprovalState(
                   req,
-                  pairedByDeviceId.get(req.deviceId),
+                  lookupPairedDevice(pairedByDeviceId, req.deviceId),
                 );
                 const statusParts = [formatPendingApprovalKind(approval.kind)];
                 if (req.isRepair) {
@@ -508,7 +519,7 @@ export function registerDevicesCli(program: Command) {
           const req = selectedRequest!;
           const approval = resolvePendingDeviceApprovalState(
             req,
-            indexPairedDevices(pairingList?.paired).get(req.deviceId),
+            lookupPairedDevice(indexPairedDevices(pairingList?.paired), req.deviceId),
           );
           const approveCommand = buildExplicitApproveCommand(opts, req.requestId);
           const authReminder = formatAuthFlagReminder(opts);
@@ -538,7 +549,7 @@ export function registerDevicesCli(program: Command) {
             defaultRuntime.log(`  Approved: ${formatAccessSummary(approval.approved)}`);
           }
           if (req.remoteIp) {
-            defaultRuntime.log(`  IP:     ${req.remoteIp}`);
+            defaultRuntime.log(`  IP:     ${sanitizeForLog(req.remoteIp)}`);
           }
           switch (approval.kind) {
             case "scope-upgrade":

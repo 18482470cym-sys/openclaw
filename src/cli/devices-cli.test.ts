@@ -127,6 +127,36 @@ describe("devices cli approve", () => {
     );
   });
 
+  it("sanitizes preview ip output for implicit approval", async () => {
+    callGateway.mockResolvedValueOnce({
+      pending: [
+        {
+          requestId: "req-abc",
+          deviceId: "device-9",
+          displayName: "Device Nine",
+          role: "operator",
+          scopes: ["operator.admin"],
+          remoteIp: "10.0.0.9\rspoof",
+          ts: 1000,
+        },
+      ],
+      paired: [
+        {
+          deviceId: "device-9",
+          displayName: "Device Nine",
+          roles: ["operator"],
+          scopes: ["operator.read"],
+        },
+      ],
+    });
+
+    await runDevicesApprove([]);
+
+    const logOutput = runtime.log.mock.calls.map((c) => readRuntimeCallText(c)).join("\n");
+    expect(logOutput).not.toContain("\r");
+    expect(logOutput).toContain("IP:     10.0.0.9spoof");
+  });
+
   it.each([
     {
       name: "id is omitted",
@@ -450,6 +480,35 @@ describe("devices cli list", () => {
     expect(output).toContain("operator.write");
     expect(output).toContain("operator.read");
     expect(output).toContain("scope upgrade");
+  });
+
+  it("normalizes pending device ids before matching paired approvals", async () => {
+    callGateway.mockResolvedValueOnce({
+      pending: [
+        {
+          requestId: "req-1",
+          deviceId: " device-1 ",
+          displayName: "Device One",
+          role: "operator",
+          scopes: ["operator.admin"],
+          ts: 1,
+        },
+      ],
+      paired: [
+        {
+          deviceId: "device-1",
+          displayName: "Device One",
+          roles: ["operator"],
+          scopes: ["operator.read"],
+        },
+      ],
+    });
+
+    await runDevicesCommand(["list"]);
+
+    const output = runtime.log.mock.calls.map((entry) => readRuntimeCallText(entry)).join("\n");
+    expect(output).toContain("scope upgrade");
+    expect(output).toContain("operator.read");
   });
 
   it("sanitizes device-controlled terminal output", async () => {
