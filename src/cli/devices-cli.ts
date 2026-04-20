@@ -12,6 +12,11 @@ import {
 import { formatTimeAgo } from "../infra/format-time/format-relative.ts";
 import { defaultRuntime } from "../runtime.js";
 import {
+  resolvePendingDeviceApprovalState,
+  type DevicePairingAccessSummary,
+  type PendingDeviceApprovalKind,
+} from "../shared/device-pairing-access.js";
+import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   normalizeStringifiedOptionalString,
@@ -217,32 +222,44 @@ function formatTokenSummary(tokens: DeviceTokenSummary[] | undefined) {
   return parts.join(", ");
 }
 
-function formatPendingRoles(request: PendingDevice): string {
-  const role = normalizeOptionalString(request.role) ?? "";
-  if (role) {
-    return role;
-  }
-  const roles = Array.isArray(request.roles)
-    ? request.roles.map((item) => item.trim()).filter((item) => item.length > 0)
-    : [];
-  if (roles.length === 0) {
-    return "";
-  }
-  return roles.join(", ");
-}
-
-function formatPendingScopes(request: PendingDevice): string {
-  const scopes = Array.isArray(request.scopes)
-    ? request.scopes.map((item) => item.trim()).filter((item) => item.length > 0)
-    : [];
-  if (scopes.length === 0) {
-    return "";
-  }
-  return scopes.join(", ");
-}
-
 function formatPendingDeviceIdentity(request: PendingDevice): string {
   return normalizeOptionalString(request.displayName) ?? request.deviceId;
+}
+
+function formatAccessSummary(access: DevicePairingAccessSummary | null): string {
+  if (!access) {
+    return "none";
+  }
+  const roles = access.roles.length > 0 ? access.roles.join(", ") : "none";
+  const scopes = access.scopes.length > 0 ? access.scopes.join(", ") : "none";
+  return `roles: ${roles}; scopes: ${scopes}`;
+}
+
+function formatPendingApprovalKind(kind: PendingDeviceApprovalKind): string {
+  switch (kind) {
+    case "new-pairing":
+      return "new pairing";
+    case "role-upgrade":
+      return "role upgrade";
+    case "scope-upgrade":
+      return "scope upgrade";
+    case "re-approval":
+      return "re-approval";
+  }
+  const exhaustiveKind: never = kind;
+  void exhaustiveKind;
+  throw new Error("unsupported pending approval kind");
+}
+
+function indexPairedDevices(paired: PairedDevice[] | undefined): Map<string, PairedDevice> {
+  const out = new Map<string, PairedDevice>();
+  for (const device of paired ?? []) {
+    const deviceId = normalizeOptionalString(device.deviceId);
+    if (deviceId) {
+      out.set(deviceId, device);
+    }
+  }
+  return out;
 }
 
 function quoteCliArg(value: string): string {
@@ -304,6 +321,7 @@ export function registerDevicesCli(program: Command) {
       .description("List pending and paired devices")
       .action(async (opts: DevicesRpcOpts) => {
         const list = await listPairingWithFallback(opts);
+        const pairedByDeviceId = indexPairedDevices(list.paired);
         if (opts.json) {
           defaultRuntime.writeJson(list);
           return;
@@ -319,21 +337,29 @@ export function registerDevicesCli(program: Command) {
               columns: [
                 { key: "Request", header: "Request", minWidth: 10 },
                 { key: "Device", header: "Device", minWidth: 16, flex: true },
-                { key: "Role", header: "Role", minWidth: 8 },
-                { key: "Scopes", header: "Scopes", minWidth: 14, flex: true },
-                { key: "IP", header: "IP", minWidth: 12 },
+                { key: "Requested", header: "Requested", minWidth: 20, flex: true },
+                { key: "Approved", header: "Approved", minWidth: 20, flex: true },
                 { key: "Age", header: "Age", minWidth: 8 },
-                { key: "Flags", header: "Flags", minWidth: 8 },
+                { key: "Status", header: "Status", minWidth: 12 },
               ],
-              rows: list.pending.map((req) => ({
-                Request: req.requestId,
-                Device: req.displayName || req.deviceId,
-                Role: formatPendingRoles(req),
-                Scopes: formatPendingScopes(req),
-                IP: req.remoteIp ?? "",
-                Age: typeof req.ts === "number" ? formatTimeAgo(Date.now() - req.ts) : "",
-                Flags: req.isRepair ? "repair" : "",
-              })),
+              rows: list.pending.map((req) => {
+                const approval = resolvePendingDeviceApprovalState(
+                  req,
+                  pairedByDeviceId.get(req.deviceId),
+                );
+                const statusParts = [formatPendingApprovalKind(approval.kind)];
+                if (req.isRepair) {
+                  statusParts.push("repair");
+                }
+                return {
+                  Request: req.requestId,
+                  Device: `${req.displayName || req.deviceId}${req.remoteIp ? ` · ${req.remoteIp}` : ""}`,
+                  Requested: formatAccessSummary(approval.requested),
+                  Approved: formatAccessSummary(approval.approved),
+                  Age: typeof req.ts === "number" ? formatTimeAgo(Date.now() - req.ts) : "",
+                  Status: statusParts.join(", "),
+                };
+              }),
             }).trimEnd(),
           );
         }
@@ -449,13 +475,13 @@ export function registerDevicesCli(program: Command) {
       .argument("[requestId]", "Pending request id")
       .option("--latest", "Show the most recent pending request to approve explicitly", false)
       .action(async (requestId: string | undefined, opts: DevicesRpcOpts) => {
+        let pairingList: DevicePairingList | null = null;
         let resolvedRequestId = requestId?.trim();
         const usingImplicitSelection = !resolvedRequestId || Boolean(opts.latest);
         let selectedRequest: PendingDevice | null = null;
         if (usingImplicitSelection) {
-          selectedRequest = selectLatestPendingRequest(
-            (await listPairingWithFallback(opts)).pending,
-          );
+          pairingList = await listPairingWithFallback(opts);
+          selectedRequest = selectLatestPendingRequest(pairingList.pending);
           resolvedRequestId = selectedRequest?.requestId?.trim();
         }
         if (!resolvedRequestId) {
@@ -467,11 +493,20 @@ export function registerDevicesCli(program: Command) {
           // Keep implicit selection preview-only. A second command with the exact
           // requestId binds the approval to the request the operator inspected.
           const req = selectedRequest!;
+          const approval = resolvePendingDeviceApprovalState(
+            req,
+            indexPairedDevices(pairingList?.paired).get(req.deviceId),
+          );
           const approveCommand = buildExplicitApproveCommand(opts, req.requestId);
           const authReminder = formatAuthFlagReminder(opts);
           if (opts.json) {
             defaultRuntime.writeJson({
               selected: req,
+              approvalState: {
+                kind: approval.kind,
+                requested: approval.requested,
+                approved: approval.approved,
+              },
               approveCommand,
               requiresAuthFlags: {
                 token: Boolean(normalizeOptionalString(opts.token)),
@@ -485,16 +520,32 @@ export function registerDevicesCli(program: Command) {
             `${theme.warn("Selected pending device request")} ${theme.command(req.requestId)}`,
           );
           defaultRuntime.log(`  Device: ${formatPendingDeviceIdentity(req)}`);
-          const role = formatPendingRoles(req);
-          if (role) {
-            defaultRuntime.log(`  Role:   ${role}`);
-          }
-          const scopes = formatPendingScopes(req);
-          if (scopes) {
-            defaultRuntime.log(`  Scopes: ${scopes}`);
+          defaultRuntime.log(`  Requested: ${formatAccessSummary(approval.requested)}`);
+          if (approval.approved) {
+            defaultRuntime.log(`  Approved: ${formatAccessSummary(approval.approved)}`);
           }
           if (req.remoteIp) {
             defaultRuntime.log(`  IP:     ${req.remoteIp}`);
+          }
+          switch (approval.kind) {
+            case "scope-upgrade":
+              defaultRuntime.log(
+                "  Note:   Already paired. Requested scopes exceed the current approval, so reconnect stays blocked until you approve this upgrade.",
+              );
+              break;
+            case "role-upgrade":
+              defaultRuntime.log(
+                "  Note:   Already paired. Requested role exceeds the current approval, so reconnect stays blocked until you approve this upgrade.",
+              );
+              break;
+            case "re-approval":
+              defaultRuntime.log(
+                "  Note:   Already paired. Approval-bound device details changed, so OpenClaw created a fresh request instead of silently reusing the old approval.",
+              );
+              break;
+            case "new-pairing":
+              defaultRuntime.log("  Note:   First-time device pairing request.");
+              break;
           }
           defaultRuntime.error(`Approve this exact request with: ${approveCommand}`);
           if (authReminder) {

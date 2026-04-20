@@ -97,6 +97,14 @@ describe("devices cli approve", () => {
           ts: 1000,
         },
       ],
+      paired: [
+        {
+          deviceId: "device-9",
+          displayName: "Device Nine",
+          roles: ["operator"],
+          scopes: ["operator.read"],
+        },
+      ],
     });
 
     await runDevicesApprove([]);
@@ -108,6 +116,8 @@ describe("devices cli approve", () => {
     const logOutput = runtime.log.mock.calls.map((c) => readRuntimeCallText(c)).join("\n");
     expect(logOutput).toContain("req-abc");
     expect(logOutput).toContain("Device Nine");
+    expect(logOutput).toContain("Approved: roles: operator; scopes: operator.read");
+    expect(logOutput).toContain("Requested scopes exceed the current approval");
     expect(runtime.error).toHaveBeenCalledWith(
       expect.stringContaining("openclaw devices approve req-abc"),
     );
@@ -208,6 +218,7 @@ describe("devices cli approve", () => {
   it("returns JSON for implicit approval preview in JSON mode", async () => {
     callGateway.mockResolvedValueOnce({
       pending: [{ requestId: "req-json", deviceId: "device-json", ts: 1000 }],
+      paired: [],
     });
 
     await runDevicesApprove(["--latest", "--json", "--url", "ws://gateway.example:18789"]);
@@ -216,6 +227,11 @@ describe("devices cli approve", () => {
     expect(runtime.error).not.toHaveBeenCalled();
     expect(runtime.writeJson).toHaveBeenCalledWith({
       selected: { requestId: "req-json", deviceId: "device-json", ts: 1000 },
+      approvalState: {
+        kind: "new-pairing",
+        requested: { roles: [], scopes: [] },
+        approved: null,
+      },
       approveCommand: "openclaw devices approve req-json --url ws://gateway.example:18789 --json",
       requiresAuthFlags: {
         token: false,
@@ -404,7 +420,7 @@ describe("devices cli local fallback", () => {
 });
 
 describe("devices cli list", () => {
-  it("renders pending scopes when present", async () => {
+  it("renders requested versus approved access for pending upgrades", async () => {
     callGateway.mockResolvedValueOnce({
       pending: [
         {
@@ -416,14 +432,24 @@ describe("devices cli list", () => {
           ts: 1,
         },
       ],
-      paired: [],
+      paired: [
+        {
+          deviceId: "device-1",
+          displayName: "Device One",
+          roles: ["operator"],
+          scopes: ["operator.read"],
+        },
+      ],
     });
 
     await runDevicesCommand(["list"]);
 
     const output = runtime.log.mock.calls.map((entry) => readRuntimeCallText(entry)).join("\n");
-    expect(output).toContain("Scopes");
-    expect(output).toContain("operator.admin, operator.read");
+    expect(output).toContain("Requested");
+    expect(output).toContain("Approved");
+    expect(output).toContain("operator.write");
+    expect(output).toContain("operator.read");
+    expect(output).toContain("scope upgrade");
   });
 });
 
