@@ -478,6 +478,47 @@ describe("web auto-reply connection", () => {
     resetLoadConfigMock();
   });
 
+  it("suppresses debounce typing for owner-gated commands from non-owners", async () => {
+    const capture = createWebListenerFactoryCapture();
+
+    setLoadConfigMock({
+      commands: {
+        config: true,
+        ownerAllowFrom: ["whatsapp:+15550009999"],
+      },
+      channels: {
+        whatsapp: {
+          debounceMs: 250,
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig);
+
+    await monitorWebChannel(false, capture.listenerFactory as never, false, async () => ({
+      text: "ok",
+    }));
+
+    const shouldStartDebounceTyping = capture.getLastOptions()?.shouldStartDebounceTyping;
+    expect(shouldStartDebounceTyping).toBeTypeOf("function");
+    await expect(
+      shouldStartDebounceTyping?.({
+        body: "/config show",
+        from: "+15550001111",
+        conversationId: "+15550001111",
+        to: "+15550009999",
+        accountId: "default",
+        chatType: "direct",
+        chatId: "direct:+15550001111",
+        id: "m1",
+        sendComposing: vi.fn(),
+        reply: vi.fn(),
+        sendMedia: vi.fn(),
+      } as never),
+    ).resolves.toBe(false);
+
+    resetLoadConfigMock();
+  });
+
   it("processes inbound messages without batching and preserves timestamps", async () => {
     await withEnvAsync({ TZ: "Europe/Vienna" }, async () => {
       const originalMax = process.getMaxListeners();

@@ -193,7 +193,7 @@ async function shouldStartWhatsAppDebounceTyping(params: {
     cfg,
     commandAuthorized,
   });
-  return commandAuthorized || commandAuth.isAuthorizedSender;
+  return commandAuthorized && commandAuth.isAuthorizedSender;
 }
 
 export async function monitorWebChannel(
